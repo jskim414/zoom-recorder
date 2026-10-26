@@ -1,0 +1,50 @@
+name: Windows packages
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: 'python -m pip install --only-binary=:all: -r requirements-dev.txt'
+      - run: python -m pytest -q
+      - run: python -m compileall -q app scripts
+  build:
+    needs: test
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        flavor: [lite, local]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          $requirements = if ('${{ matrix.flavor }}' -eq 'local') { 'requirements.txt' } else { 'requirements-core.txt' }
+          python -m pip install --only-binary=:all: -r $requirements -r requirements-build.txt
+      - shell: pwsh
+        run: ./scripts/build.ps1 -Flavor '${{ matrix.flavor }}' -Python python
+      - name: Check packaged GUI and worker without capture
+        shell: pwsh
+        run: |
+          $name = if ('${{ matrix.flavor }}' -eq 'local') { 'ZoomRecorder-Local' } else { 'ZoomRecorder-Lite' }
+          python -m scripts.smoke_package "dist/$name/$name.exe" --output "logs/validation-artifacts/package-${{ matrix.flavor }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZoomRecorder-${{ matrix.flavor }}-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error

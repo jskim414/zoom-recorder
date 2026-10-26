@@ -1,0 +1,8 @@
+PyAudioWPatch>=0.2.12.8,<0.3; sys_platform == "win32"
+PySide6-Essentials>=6.8,<7
+psutil>=6,<8
+pywin32>=308; sys_platform == "win32"
+pycaw>=20240210; sys_platform == "win32"
+PyYAML>=6,<7
+numpy>=1.26,<3
+webrtcvad-wheels==2.0.14.post1

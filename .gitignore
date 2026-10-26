@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+recordings/
+models/
+cuda/
+config/settings.yaml
+diagnostics.local.json
+startup-error.log
+model-download.log
+validation-artifacts/
+Zoom Recorder.lnk
+*.egg-info/
+dist/
+build/
+.venv-build/
+data/
+logs/
+.env
+.env.*
+*.key

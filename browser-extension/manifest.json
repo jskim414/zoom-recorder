@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Local Zoom Meeting Candidate",
+  "version": "0.1.0",
+  "description": "Reports only Zoom meeting UI candidates to your local recorder. Never starts recording.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "background.js"},
+  "content_scripts": [{
+    "matches": ["https://zoom.us/*", "https://*.zoom.us/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "options_ui": {"page": "options.html", "open_in_tab": true},
+  "action": {"default_title": "로컬 Zoom 감지 설정"}
+}

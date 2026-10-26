@@ -1,0 +1,26 @@
+recordings_dir: recordings
+segment_seconds: 120
+stable_seconds: 7
+end_grace_seconds: 30
+cooldown_seconds: 30
+microphone_index: null
+bridge_port: 17843
+# chrome://extensions or edge://extensions 에 표시되는 ID를 명시적으로 등록
+extension_ids: []
+model: models/small
+device: cpu
+# null: 자동 언어 감지; ko/en: 언어 고정
+language: null
+# 새 설치는 녹음만. 기존 settings.yaml의 선택은 유지됩니다.
+auto_transcribe: false
+transcription_backend: local
+cpu_threads: 2
+beam_size: 1
+auto_detect: true
+# null: 자동 삭제 OFF. 양의 정수 지정 시 완료 세션만 기간 경과 후 삭제.
+retention_days: null
+zoom_process_names: [zoom.exe, zoom, zoomworkplace.exe]
+meeting_title_patterns: ['zoom meeting', 'zoom 회의', 'zoom 미팅', 'zoom workplace.*meeting']
+silence_seconds: 120
+reminder_foreground: false
+long_recording_minutes: 60
