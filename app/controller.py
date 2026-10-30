@@ -79,6 +79,8 @@ class Controller:
                                              self.manager.consent_at, folder_name)
             self.store.update(selected_tracks=list(options.selected_tracks),
                               storage_policy={"temporary_wav": True, "create_mix": options.create_mix,
+                                              "convert_to_mp3": options.convert_to_mp3,
+                                              "delete_audio_after_transcription": options.delete_audio_after_transcription,
                                               "transcribe_required": options.auto_transcribe},
                               capture_scope="system_output_all_apps" if options.record_pc else "microphone_only")
             if self.api_approved:
@@ -143,6 +145,8 @@ class Controller:
             self.notifications.put(("finalization_failed", None))
 
     def retry_transcription(self, store, *, api_approved=False):
+        if store.metadata.get("audio_cleanup", {}).get("status") in {"deleting", "complete"}:
+            raise ValueError("음성이 삭제되었거나 삭제 중입니다. 전사문을 열거나 저장·삭제 재시도를 사용하세요.")
         if self.settings.transcription_backend == "openai" and api_approved is not True:
             raise PermissionError("API upload requires per-session approval")
         if self.future or self.manager.state in {State.PROMPTED, State.FINALIZING}:
@@ -169,7 +173,7 @@ class Controller:
         if store.metadata.get("state") not in {"COMPLETE", "ERROR", "RECOVERY_REQUIRED"}:
             raise RuntimeError("종료된 녹음만 변환할 수 있습니다.")
         if not store.metadata.get("storage_policy", {}).get("temporary_wav"):
-            raise ValueError("새 버전에서 녹음한 세션만 MP3 보관 재시도를 지원합니다.")
+            raise ValueError("새 버전에서 녹음한 세션만 저장·삭제 재시도를 지원합니다.")
         self._enqueue(store, self.settings, False, transcribe=False)
 
     def poll(self):
@@ -221,6 +225,11 @@ class Controller:
                                         task.store.directory.name))
                 if task.store.metadata.get("archive", {}).get("cleanup") == "retained":
                     self.notifications.put(("wav_retained", task.store.directory.name))
+                cleanup = task.store.metadata.get("audio_cleanup", {})
+                if cleanup.get("status") == "complete":
+                    self.notifications.put(("audio_deleted", task.store.directory.name))
+                elif cleanup.get("status") == "retained":
+                    self.notifications.put(("audio_retained", task.store.directory.name))
             except Exception as error:
                 if selected:
                     self.manager.fail()
@@ -228,7 +237,7 @@ class Controller:
                         "engine_missing" if isinstance(error, ImportError) else "processing_failed")
                 try:
                     fields = {"state": "ERROR", "processing_error": code}
-                    if task.transcribe:
+                    if task.transcribe and task.store.metadata.get("transcription", {}).get("status") != "complete":
                         fields["transcription"] = {"status": "failed", "code": code}
                     task.store.update(**fields)
                 except OSError:

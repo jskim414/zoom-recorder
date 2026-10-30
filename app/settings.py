@@ -11,6 +11,8 @@ class Settings:
     record_pc: bool = True
     record_mic: bool = True
     create_mix: bool = True
+    convert_to_mp3: bool = True
+    delete_audio_after_transcription: bool = False
     segment_seconds: int = 120
     stable_seconds: float = 7.0
     end_grace_seconds: float = 30.0
@@ -34,7 +36,7 @@ class Settings:
     meeting_title_patterns: list[str] = field(default_factory=lambda: [r"zoom meeting", r"zoom 회의", r"zoom 미팅", r"zoom workplace.*meeting"])
 
     def validate(self):
-        for name in ("record_pc", "record_mic", "create_mix"):
+        for name in ("record_pc", "record_mic", "create_mix", "convert_to_mp3", "delete_audio_after_transcription"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
         if not (self.record_pc or self.record_mic):

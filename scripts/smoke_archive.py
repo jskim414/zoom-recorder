@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--exe", type=Path)
+    parser.add_argument("--delete-audio", action="store_true")
+    parser.add_argument("--no-mp3", action="store_true")
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -39,13 +41,14 @@ def main():
                 "sample_width": 2, "codec": "PCM16", "duration": wav.getnframes() / wav.getframerate()})
     store.update(state="FINALIZING", segments=segments, selected_tracks=["remote", "mic"],
                  ended_at=store.metadata["started_at"], validation_kind="windows_local_tts_no_capture",
-                 storage_policy={"temporary_wav": True, "create_mix": True, "transcribe_required": bool(args.model)})
+                 storage_policy={"temporary_wav": True, "create_mix": True, "transcribe_required": bool(args.model),
+                                 "convert_to_mp3": not args.no_mp3, "delete_audio_after_transcription": args.delete_audio})
     settings = Settings(model=str(args.model.resolve()) if args.model else "models/missing", cpu_threads=2)
     command = [str(args.exe.resolve()), "--transcription-worker"] if args.exe else [sys.executable, "-m", "app.processing.worker"]
     environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     environment.pop("OPENAI_API_KEY", None)
     results = []
-    for attempt in range(2 if args.model else 1):
+    for attempt in range(2 if args.model and not args.delete_audio else 1):
         started = time.monotonic()
         result = subprocess.run(command, input=json.dumps({"settings": asdict(settings),
             "directory": str(store.directory), "transcribe": bool(args.model)}),
@@ -53,18 +56,24 @@ def main():
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
         store = SessionStore(store.directory)
         assert result.returncode == 0, (store.metadata.get("processing_error"), result.stderr)
-        assert store.metadata["archive"]["cleanup"] == "complete"
-        assert not list((store.directory / "audio").glob("*.wav"))
-        assert len(list(store.directory.glob("*.mp3"))) == 3
+        deleted = bool(args.delete_audio and args.model)
+        mp3_count = len(list(store.directory.glob("*.mp3")))
+        wav_count = len(list((store.directory / "audio").glob("*.wav")))
+        assert mp3_count == (0 if deleted or args.no_mp3 else 3)
+        assert wav_count == (2 if args.no_mp3 and not deleted else 0)
+        if deleted:
+            assert store.metadata["audio_cleanup"]["status"] == "complete"
         checks = {}
         if args.model:
             text = (store.directory / "transcript.md").read_text(encoding="utf-8")
             checks = {"korean_phrase": "프로젝트" in text, "english_phrase": "project" in text.lower(),
                       "pc_source": "PC 음성" in text, "mic_source": "**마이크**" in text,
-                      "no_deleted_wav_links": ".wav" not in text, "no_mix_transcription": "합본.mp3" not in text}
+                      "no_deleted_wav_links": args.no_mp3 and not deleted or ".wav" not in text,
+                      "no_mix_transcription": "합본.mp3" not in text}
             assert all(checks.values()), checks
-        results.append({"input": "WAV" if attempt == 0 else "MP3", "seconds": round(time.monotonic() - started, 2),
-                        "checks": checks, "wav_removed": True, "mp3_count": 3})
+        results.append({"input": "WAV" if attempt == 0 or args.no_mp3 else "MP3", "seconds": round(time.monotonic() - started, 2),
+                        "checks": checks, "wav_removed": wav_count == 0, "mp3_count": mp3_count,
+                        "audio_deleted": deleted})
     from scripts.inspect_session import inspect_session
     inspection = inspect_session(store.directory)
     assert inspection["file_checks_passed"], inspection

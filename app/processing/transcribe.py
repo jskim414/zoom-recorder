@@ -7,7 +7,7 @@ from pathlib import Path
 from app.audio.validation import inspect_wav
 
 from app.processing.render_markdown import render_markdown
-from app.processing.archive import source_items, reference_file
+from app.processing.archive import source_items, reference_file, digest
 from app.processing.model_download import model_installed
 from app.storage.session_store import SessionStore, safe_child, utc_now
 
@@ -69,6 +69,8 @@ class Transcriber:
         return result
 
     def run(self, store: SessionStore, *, api_approved=False) -> Path:
+        if store.metadata.get("audio_cleanup", {}).get("status") in {"deleting", "complete"}:
+            raise ValueError("Audio has been deleted; retranscription is unavailable")
         api = self.settings.transcription_backend == "openai"
         if api and api_approved is not True:
             raise PermissionError("API upload requires per-session approval")
@@ -79,6 +81,8 @@ class Transcriber:
                                                          "requested_device": self.settings.device})
         device = "api" if api else self.settings.device
         try:
+            fingerprints = {item["file"]: digest(safe_child(store.directory, item["file"]))
+                            for item in source_items(store)}
             try:
                 if api:
                     from app.processing.api_transcribe import transcribe_api
@@ -92,6 +96,8 @@ class Transcriber:
                 store.log("transcription_cpu_fallback")
                 result = self._run(store, device)
             destination = store.directory / "transcript.md"
+            if any(digest(safe_child(store.directory, name)) != value for name, value in fingerprints.items()):
+                raise ValueError("Audio changed during transcription; preserving files")
             temp = destination.with_suffix(".md.tmp")
             with temp.open("w", encoding="utf-8") as f:
                 f.write(render_markdown(store.metadata, result))
@@ -102,7 +108,8 @@ class Transcriber:
                          transcription={"status": "complete", "model": model_name,
                                         "backend": self.settings.transcription_backend,
                                         "device": device, "language": self.settings.language or "auto",
-                                        "completed_at": utc_now(), "segment_count": len(result)})
+                                        "completed_at": utc_now(), "segment_count": len(result),
+                                        "sha256": digest(destination), "audio_fingerprints": fingerprints})
             store.log("transcription_complete", device=device, segment_count=len(result))
             return destination
         except Exception as error:

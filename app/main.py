@@ -24,7 +24,7 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--recover", type=Path)
     mode.add_argument("--transcribe", type=Path)
-    mode.add_argument("--archive", type=Path, help="Retry local MP3 export/temporary WAV cleanup for a new session")
+    mode.add_argument("--archive", type=Path, help="Retry local storage/audio cleanup using the session's saved policy")
     args = parser.parse_args(argv)
     app = None
     try:

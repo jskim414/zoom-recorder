@@ -3,6 +3,10 @@ previous_recordings_dirs: []
 record_pc: true
 record_mic: true
 create_mix: true
+# MP3 OFF: separate segmented WAV files. Changes apply to new recordings only.
+convert_to_mp3: true
+# Successful transcription only; failure/empty results/gaps preserve audio.
+delete_audio_after_transcription: false
 segment_seconds: 120
 stable_seconds: 7
 end_grace_seconds: 30

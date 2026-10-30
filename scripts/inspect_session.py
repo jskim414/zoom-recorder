@@ -19,6 +19,19 @@ def inspect_session(directory: Path) -> dict:
         report["issues"].append("Session is still active; stop and wait before inspection")
         report["file_checks_passed"] = False
         return report
+    cleanup = metadata.get("audio_cleanup", {})
+    if cleanup.get("status") in {"deleting", "complete"}:
+        from app.processing.archive import digest
+        transcript = safe_child(directory, "transcript.md")
+        if not transcript.is_file() or digest(transcript) != cleanup.get("transcript_sha256"):
+            report["issues"].append("Deleted-audio session has no verified transcript")
+        if cleanup["status"] == "deleting":
+            report["issues"].append("Audio cleanup was interrupted; use storage cleanup retry")
+        elif metadata["segments"] or any(safe_child(directory, i["file"]).exists() for i in cleanup["files"]):
+            report["issues"].append("Audio deletion is incomplete")
+        report["audio_deleted"] = cleanup["status"] == "complete"
+        report["file_checks_passed"] = not report["issues"]
+        return report
     seen = set()
     tracks = set()
     for item in metadata["segments"]:

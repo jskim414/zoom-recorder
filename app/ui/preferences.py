@@ -40,8 +40,8 @@ class PreferencesDialog(QDialog):
         self.auto_detect = QCheckBox("Zoom 회의 가능성을 감지하면 알림")
         self.auto_detect.setChecked(window.saved_settings.auto_detect)
         self.recording_mode = QComboBox()
-        self.recording_mode.addItem("녹음만 · MP3 저장", False)
-        self.recording_mode.addItem("녹음 + 전사 · MP3와 텍스트 저장", True)
+        self.recording_mode.addItem("녹음만", False)
+        self.recording_mode.addItem("녹음 + 자동 전사", True)
         self.recording_mode.setCurrentIndex(int(window.saved_settings.auto_transcribe))
         self.startup = QCheckBox("Windows 로그인 시 앱 실행")
         self.initial_startup = False
@@ -55,6 +55,15 @@ class PreferencesDialog(QDialog):
         mode_note = QLabel("녹음만 선택하면 AI 모델을 실행하지 않습니다.\n저장된 녹음은 나중에 전사할 수 있습니다.")
         mode_note.setObjectName("muted")
         form.addRow(mode_note)
+        self.convert_to_mp3 = QCheckBox("녹음 후 MP3로 변환")
+        self.convert_to_mp3.setChecked(window.saved_settings.convert_to_mp3)
+        self.delete_audio_after_transcription = QCheckBox("전사 성공 후 음성 파일 삭제")
+        self.delete_audio_after_transcription.setChecked(window.saved_settings.delete_audio_after_transcription)
+        form.addRow("음성 보관", self.convert_to_mp3)
+        form.addRow(self.delete_audio_after_transcription)
+        self.storage_note = QLabel()
+        self.storage_note.setWordWrap(True)
+        form.addRow(self.storage_note)
         form.addRow("자동 실행", self.startup)
         form.addRow("회의 알림", self.auto_detect)
         self.silence = QComboBox()
@@ -90,10 +99,14 @@ class PreferencesDialog(QDialog):
         self.create_mix = QCheckBox("두 음성을 녹음하면 합본 MP3도 생성")
         self.create_mix.setChecked(window.saved_settings.create_mix)
         form.addRow("합본", self.create_mix)
-        policy = QLabel("개별 MP3를 128kbps로 저장합니다. 녹음 중에는 임시 WAV 공간이 필요합니다.\n"
-                        "MP3 검증과 필요한 전사가 끝나면 임시 WAV를 자동 삭제합니다. 실패·누락 시에는 보존합니다.")
+        policy = QLabel("녹음 중에는 WAV 공간이 필요합니다. MP3 변환은 로컬에서 128kbps로 처리합니다.\n"
+                        "전사 실패·빈 결과·녹음 누락 시에는 음성을 보존합니다. 음성 삭제 후에는 재생·재전사가 불가능합니다.")
         policy.setWordWrap(True)
         form.addRow(policy)
+        self.convert_to_mp3.toggled.connect(self.update_storage_controls)
+        self.delete_audio_after_transcription.toggled.connect(self.update_storage_controls)
+        self.recording_mode.currentIndexChanged.connect(self.update_storage_controls)
+        self.update_storage_controls()
         for label in general.findChildren(QLabel):
             label.setWordWrap(True)
         general_scroll = QScrollArea()
@@ -340,6 +353,19 @@ class PreferencesDialog(QDialog):
         if directory:
             self.recordings_path.setText(directory)
 
+    def update_storage_controls(self, *_):
+        convert = self.convert_to_mp3.isChecked()
+        delete = self.delete_audio_after_transcription.isChecked()
+        immediate = self.recording_mode.currentData() and delete
+        self.create_mix.setEnabled(convert and not immediate)
+        if immediate:
+            text = "WAV로 바로 전사한 뒤 음성을 삭제합니다. MP3 변환·합본 생성은 생략하고 전사문만 남깁니다."
+        else:
+            text = "MP3로 보관하고 검증 후 임시 WAV를 삭제합니다." if convert else "변환 없이 PC/마이크별 분할 WAV를 보관합니다."
+            if delete:
+                text += " 나중에 전사가 성공하면 해당 녹음의 WAV·MP3·합본을 삭제합니다."
+        self.storage_note.setText(text + " 변경은 새 녹음부터 적용됩니다.")
+
     def save(self):
         if self.window.controller.busy or self.window.controller.manager.state.value == "PROMPTED":
             self.message.setText("녹음과 처리가 끝난 뒤 설정을 저장하세요.")
@@ -350,6 +376,8 @@ class PreferencesDialog(QDialog):
                               recordings_dir=self.recordings_path.text().strip(),
                               record_pc=self.record_pc.isChecked(), record_mic=self.record_mic.isChecked(),
                               create_mix=self.create_mix.isChecked(),
+                              convert_to_mp3=self.convert_to_mp3.isChecked(),
+                              delete_audio_after_transcription=self.delete_audio_after_transcription.isChecked(),
                               auto_detect=self.auto_detect.isChecked(),
                               silence_seconds=self.silence.currentData(),
                               reminder_foreground=self.foreground.isChecked(),
@@ -383,7 +411,7 @@ class PreferencesDialog(QDialog):
         # Recording settings can be applied safely between sessions. Detector transport stays fixed until restart.
         for name in ("auto_transcribe", "transcription_backend", "model", "device", "cpu_threads", "beam_size",
                      "silence_seconds", "reminder_foreground", "long_recording_minutes",
-                     "record_pc", "record_mic", "create_mix"):
+                     "record_pc", "record_mic", "create_mix", "convert_to_mp3", "delete_audio_after_transcription"):
             setattr(self.window.settings, name, getattr(updated, name))
             setattr(self.window.controller.settings, name, getattr(updated, name))
         if self.window.poc:

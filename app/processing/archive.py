@@ -222,6 +222,8 @@ def cleanup_wav(store):
 
 def source_items(store):
     """WAV until committed; archived tracks after cleanup, never the mixed export."""
+    if store.metadata.get("audio_cleanup", {}).get("status") in {"deleting", "complete"}:
+        raise ValueError("Audio has been deleted; retranscription is unavailable")
     items = sorted(store.metadata["segments"], key=lambda s: (s["offset"], s["track"]))
     if any(i.get("codec") == "MP3" for i in items):
         archive = validate_archive(store)
