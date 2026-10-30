@@ -4,22 +4,15 @@ Imports of AV/NumPy stay inside worker functions so idle UI stays lightweight.
 Only sessions explicitly marked by the new recorder may retire their WAVs.
 """
 from contextlib import ExitStack
-import hashlib
 import math
 import os
-from pathlib import Path
-import re
 
+from app.storage.audio_files import NAMES, digest, is_temporary_wav, owned_audio_path
+from app.storage.policy import StoragePolicy, audio_deletion_started
 from app.storage.session_store import safe_child, utc_now, has_unindexed_audio
 
 RATE = 48000
 BLOCK = 48000
-NAMES = {"remote": "PC음성.mp3", "mic": "마이크음성.mp3", "mixed": "합본.mp3"}
-
-
-def digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def verify_mp3(path, expected_samples, expected_hash=None):
@@ -55,7 +48,7 @@ def validate_archive(store):
     present = {i["track"] for i in archive["files"]}
     if not expected or not expected <= present:
         raise ValueError("Missing selected track archive")
-    if len(expected) == 2 and store.metadata["storage_policy"].get("create_mix") and "mixed" not in present:
+    if len(expected) == 2 and StoragePolicy.from_metadata(store.metadata).create_mix and "mixed" not in present:
         raise ValueError("Missing mixed archive")
     return archive
 
@@ -100,7 +93,8 @@ class Timeline:
 
 
 def create_archive(store):
-    if not store.metadata.get("storage_policy", {}).get("temporary_wav"):
+    policy = StoragePolicy.from_metadata(store.metadata)
+    if not policy.temporary_wav:
         return None  # Older sessions are never silently converted/deleted.
     previous = store.metadata.get("archive", {})
     if previous.get("status") == "verified":
@@ -120,7 +114,7 @@ def create_archive(store):
     if not originals or any(i["track"] not in selected for i in originals):
         raise ValueError("Missing or unexpected source tracks")
     for item in originals:
-        if not re.fullmatch(r"audio/(remote|mic)_[0-9]{4,}\.wav", item["file"]):
+        if not is_temporary_wav(item["file"]):
             raise ValueError("Not a temporary recording WAV")
         inspect_wav(safe_child(store.directory, item["file"]), item)
         item["source_sha256"] = digest(safe_child(store.directory, item["file"]))
@@ -130,7 +124,7 @@ def create_archive(store):
         raise ValueError("A selected source has no audio; WAVs preserved")
     samples = math.ceil(max(i["offset"] + i["duration"] for i in originals) * RATE)
     names = list(selected)
-    if len(names) == 2 and store.metadata["storage_policy"].get("create_mix"):
+    if len(names) == 2 and policy.create_mix:
         names.append("mixed")
     for name in names:
         if (store.directory / NAMES[name]).exists() and NAMES[name] not in previous.get("owned_files", []):
@@ -184,14 +178,14 @@ def create_archive(store):
 
 def cleanup_wav(store):
     """Commit replacement indexes BEFORE deleting only exact owned temporary files."""
-    if not store.metadata.get("storage_policy", {}).get("temporary_wav"):
+    policy = StoragePolicy.from_metadata(store.metadata)
+    if not policy.temporary_wav:
         return
     archive = validate_archive(store)
-    policy = store.metadata["storage_policy"]
     reason = None
     if store.metadata["errors"] or store.metadata["gaps"] or has_unindexed_audio(store.directory, store.metadata):
         reason = "capture_or_recovery_requires_review"
-    elif policy.get("transcribe_required") and (
+    elif policy.transcribe_required and (
             store.metadata.get("transcription", {}).get("status") != "complete"
             or not (store.directory / "transcript.md").is_file()):
         reason = "transcription_incomplete"
@@ -201,11 +195,9 @@ def cleanup_wav(store):
     pending = []
     # Validate the entire deletion set, including path containment, before the first unlink.
     for item in archive["original_segments"]:
-        if not re.fullmatch(r"audio/(remote|mic)_[0-9]{4,}\.wav", item["file"]):
+        if not is_temporary_wav(item["file"]):
             raise ValueError("Refusing to delete non-temporary WAV")
-        path = safe_child(store.directory, item["file"])
-        if path.parent != (store.directory / "audio").resolve() or (store.directory / item["file"]).is_symlink():
-            raise ValueError("Refusing redirected WAV deletion")
+        path = owned_audio_path(store.directory, item["file"])
         if path.exists():
             from app.audio.validation import inspect_wav
             inspect_wav(path, item)
@@ -222,7 +214,7 @@ def cleanup_wav(store):
 
 def source_items(store):
     """WAV until committed; archived tracks after cleanup, never the mixed export."""
-    if store.metadata.get("audio_cleanup", {}).get("status") in {"deleting", "complete"}:
+    if audio_deletion_started(store.metadata):
         raise ValueError("Audio has been deleted; retranscription is unavailable")
     items = sorted(store.metadata["segments"], key=lambda s: (s["offset"], s["track"]))
     if any(i.get("codec") == "MP3" for i in items):

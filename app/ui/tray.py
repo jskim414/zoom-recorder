@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
                                QScrollArea, QSystemTrayIcon, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from app.controller import Controller
+from app.storage.policy import StoragePolicy
 from app.audio.activity import RecordingReminder
 from app.storage.history import recent_sessions
 from app.detection.session_manager import CandidateTracker, State
@@ -658,11 +659,13 @@ class RecorderWindow(QMainWindow):
             self.timer.setInterval(interval)
         store = self.controller.store
         options = self.settings
-        if options.delete_audio_after_transcription:
-            policy_text = ("WAV로 전사 후 음성 삭제 · MP3 생성 생략" if options.auto_transcribe else
-                           ("MP3 보관" if options.convert_to_mp3 else "WAV 보관") + " · 나중 전사 성공 후 음성 삭제")
+        policy = StoragePolicy.from_settings(options)
+        if policy.delete_after(transcribe=options.auto_transcribe):
+            policy_text = "WAV로 전사 후 음성 삭제 · MP3 생성 생략"
+        elif policy.delete_audio_after_transcription:
+            policy_text = ("MP3 보관" if policy.convert_to_mp3 else "WAV 보관") + " · 나중 전사 성공 후 음성 삭제"
         else:
-            policy_text = "MP3 보관 · 검증 후 임시 WAV 삭제" if options.convert_to_mp3 else "WAV 보관 · 음성 삭제 안 함"
+            policy_text = "MP3 보관 · 검증 후 임시 WAV 삭제" if policy.convert_to_mp3 else "WAV 보관 · 음성 삭제 안 함"
         self.storage_policy_label.setText(policy_text + "\n실패·빈 전사·누락 시에는 음성을 보존합니다.")
         elapsed = max(0, int(time.monotonic() - store.metadata["monotonic_start"])) if recording and store else 0
         connected = time.monotonic() - self.bridge.last_heartbeat < 20

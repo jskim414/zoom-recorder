@@ -7,7 +7,9 @@ from pathlib import Path
 from app.audio.validation import inspect_wav
 
 from app.processing.render_markdown import render_markdown
-from app.processing.archive import source_items, reference_file, digest
+from app.processing.archive import source_items, reference_file
+from app.storage.audio_files import digest
+from app.storage.policy import audio_deletion_started
 from app.processing.model_download import model_installed
 from app.storage.session_store import SessionStore, safe_child, utc_now
 
@@ -69,7 +71,7 @@ class Transcriber:
         return result
 
     def run(self, store: SessionStore, *, api_approved=False) -> Path:
-        if store.metadata.get("audio_cleanup", {}).get("status") in {"deleting", "complete"}:
+        if audio_deletion_started(store.metadata):
             raise ValueError("Audio has been deleted; retranscription is unavailable")
         api = self.settings.transcription_backend == "openai"
         if api and api_approved is not True:

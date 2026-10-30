@@ -8,6 +8,7 @@ import sys
 
 from app.settings import Settings
 from app.paths import source_root
+from app.processing.pipeline import run_pipeline
 from app.storage.session_store import SessionStore
 
 
@@ -63,39 +64,6 @@ def main():
                      transcription=status if status.get("status") in {"failed", "complete"} else
                      {**status, "status": "failed" if transcribe else "disabled"})
         return 1
-
-
-def run_pipeline(store, settings, *, transcribe=True, api_approved=False):
-    from app.processing.archive import create_archive, cleanup_wav
-    from app.processing.audio_cleanup import delete_transcribed_audio
-    policy = store.metadata.get("storage_policy", {})
-    deleting = policy.get("delete_audio_after_transcription") is True
-    cleanup_status = store.metadata.get("audio_cleanup", {}).get("status")
-    if cleanup_status in {"deleting", "complete"}:
-        if transcribe:
-            raise ValueError("Audio deletion started; use storage cleanup retry instead of transcription")
-        delete_transcribed_audio(store)
-        store.update(state="COMPLETE", processing_error=None)
-        return
-    if transcribe and settings.transcription_backend == "openai" and api_approved is not True:
-        raise PermissionError("API upload requires per-session approval")
-    ready_to_delete = deleting and (transcribe or store.metadata.get("transcription", {}).get("status") == "complete")
-    if policy.get("convert_to_mp3", True) and not ready_to_delete:
-        create_archive(store)
-    if transcribe:
-        from app.processing.transcribe import Transcriber
-        Transcriber(settings).run(store, api_approved=api_approved)
-    else:
-        # Do not erase a completed transcript status on a cleanup retry.
-        if store.metadata.get("transcription", {}).get("status") != "complete":
-            store.update(transcription={"status": "disabled"})
-    if deleting and ready_to_delete:
-        delete_transcribed_audio(store)
-    elif policy.get("convert_to_mp3", True):
-        cleanup_wav(store)
-    if deleting and not ready_to_delete:
-        delete_transcribed_audio(store)  # mark waiting; audio remains until transcription succeeds
-    store.update(state="ERROR" if store.metadata["errors"] else "COMPLETE", processing_error=None)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
 
 from app.settings import save_settings
 from app.storage.locations import check_recording_root
+from app.storage.policy import StoragePolicy
 from app.processing.model_download import (MODEL_NAMES, ModelDownload, local_engine_available,
                                             missing_gpu_libraries, model_directory, model_installed)
 from app.startup import set_startup, startup_enabled
@@ -354,15 +355,16 @@ class PreferencesDialog(QDialog):
             self.recordings_path.setText(directory)
 
     def update_storage_controls(self, *_):
-        convert = self.convert_to_mp3.isChecked()
-        delete = self.delete_audio_after_transcription.isChecked()
-        immediate = self.recording_mode.currentData() and delete
-        self.create_mix.setEnabled(convert and not immediate)
+        policy = StoragePolicy(convert_to_mp3=self.convert_to_mp3.isChecked(),
+                               delete_audio_after_transcription=self.delete_audio_after_transcription.isChecked())
+        transcribe = self.recording_mode.currentData()
+        immediate = policy.delete_after(transcribe=transcribe)
+        self.create_mix.setEnabled(policy.export_before(transcribe=transcribe))
         if immediate:
             text = "WAV로 바로 전사한 뒤 음성을 삭제합니다. MP3 변환·합본 생성은 생략하고 전사문만 남깁니다."
         else:
-            text = "MP3로 보관하고 검증 후 임시 WAV를 삭제합니다." if convert else "변환 없이 PC/마이크별 분할 WAV를 보관합니다."
-            if delete:
+            text = "MP3로 보관하고 검증 후 임시 WAV를 삭제합니다." if policy.convert_to_mp3 else "변환 없이 PC/마이크별 분할 WAV를 보관합니다."
+            if policy.delete_audio_after_transcription:
                 text += " 나중에 전사가 성공하면 해당 녹음의 WAV·MP3·합본을 삭제합니다."
         self.storage_note.setText(text + " 변경은 새 녹음부터 적용됩니다.")
 

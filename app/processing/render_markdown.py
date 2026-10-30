@@ -1,5 +1,7 @@
 import html
 
+from app.storage.policy import StoragePolicy
+
 
 def timestamp(seconds: float) -> str:
     value = max(0, int(seconds))
@@ -7,7 +9,7 @@ def timestamp(seconds: float) -> str:
 
 
 def render_markdown(metadata: dict, segments: list[dict]) -> str:
-    deleting = metadata.get("storage_policy", {}).get("delete_audio_after_transcription") is True
+    deleting = StoragePolicy.from_metadata(metadata).delete_audio_after_transcription
     lines = ["# 회의 전사", "", f"- 녹음 시작: {metadata['started_at']}",
              f"- 녹음 종료: {metadata.get('ended_at') or '복구 중 / 알 수 없음'}",
              "- 시스템 출력은 Zoom 외 다른 앱 소리도 포함합니다.",

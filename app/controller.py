@@ -9,6 +9,7 @@ from app.audio.recorder import Recorder
 from app.detection.session_manager import SessionManager, State
 from app.processing.worker import ProcessTranscriber, ProcessArchiver
 from app.storage.locations import check_recording_root
+from app.storage.policy import StoragePolicy, audio_deletion_started
 from app.storage.session_store import SessionStore, available_session_path, recover_session, utc_now
 
 
@@ -78,10 +79,7 @@ class Controller:
             self.store = SessionStore.create(Path(self.settings.recordings_dir), self.manager.selected.source,
                                              self.manager.consent_at, folder_name)
             self.store.update(selected_tracks=list(options.selected_tracks),
-                              storage_policy={"temporary_wav": True, "create_mix": options.create_mix,
-                                              "convert_to_mp3": options.convert_to_mp3,
-                                              "delete_audio_after_transcription": options.delete_audio_after_transcription,
-                                              "transcribe_required": options.auto_transcribe},
+                              storage_policy=StoragePolicy.from_settings(options).to_metadata(),
                               capture_scope="system_output_all_apps" if options.record_pc else "microphone_only")
             if self.api_approved:
                 self.store.log("api_upload_approved", provider="openai", approved_at=utc_now())
@@ -145,7 +143,7 @@ class Controller:
             self.notifications.put(("finalization_failed", None))
 
     def retry_transcription(self, store, *, api_approved=False):
-        if store.metadata.get("audio_cleanup", {}).get("status") in {"deleting", "complete"}:
+        if audio_deletion_started(store.metadata):
             raise ValueError("음성이 삭제되었거나 삭제 중입니다. 전사문을 열거나 저장·삭제 재시도를 사용하세요.")
         if self.settings.transcription_backend == "openai" and api_approved is not True:
             raise PermissionError("API upload requires per-session approval")
@@ -172,7 +170,7 @@ class Controller:
             raise RuntimeError("녹음 저장을 마친 뒤 재시도하세요.")
         if store.metadata.get("state") not in {"COMPLETE", "ERROR", "RECOVERY_REQUIRED"}:
             raise RuntimeError("종료된 녹음만 변환할 수 있습니다.")
-        if not store.metadata.get("storage_policy", {}).get("temporary_wav"):
+        if not StoragePolicy.from_metadata(store.metadata).temporary_wav:
             raise ValueError("새 버전에서 녹음한 세션만 저장·삭제 재시도를 지원합니다.")
         self._enqueue(store, self.settings, False, transcribe=False)
 

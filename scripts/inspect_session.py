@@ -21,7 +21,7 @@ def inspect_session(directory: Path) -> dict:
         return report
     cleanup = metadata.get("audio_cleanup", {})
     if cleanup.get("status") in {"deleting", "complete"}:
-        from app.processing.archive import digest
+        from app.storage.audio_files import digest
         transcript = safe_child(directory, "transcript.md")
         if not transcript.is_file() or digest(transcript) != cleanup.get("transcript_sha256"):
             report["issues"].append("Deleted-audio session has no verified transcript")
