@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QPushButton,
-                               QSystemTrayIcon, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QScrollArea, QSystemTrayIcon, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from app.controller import Controller
 from app.audio.activity import RecordingReminder
@@ -32,20 +32,22 @@ LABELS = {State.IDLE: "녹음 준비", State.CANDIDATE: "회의 가능성을 발
           State.SKIPPED: "녹음 준비", State.ERROR: "확인이 필요해요 · 녹음 OFF",
           State.RECOVERY_REQUIRED: "복구 확인 필요 · 녹음 OFF"}
 ERRORS = {
+    "archive_complete": "MP3 저장 처리를 마쳤습니다. 폴더에서 개별 음성과 합본을 확인하세요.",
+    "wav_retained": "오류·누락 또는 미완료 전사 때문에 임시 WAV를 보존했습니다. 원인 확인 후 재시도하세요.",
     "speech_monitor_unavailable": "발화 감지를 사용할 수 없습니다. 녹음은 계속됩니다. 종료 여부를 직접 확인하세요.",
     "device_open_failed": "장치를 열 수 없습니다. 장치 선택과 Windows 마이크 권한을 확인하세요. 다른 트랙만 녹음 중일 수 있습니다.",
     "device_disconnected": "장치 연결이 끊겼습니다. 다른 트랙만 녹음 중일 수 있습니다. 자동 전환하지 않습니다.",
     "default_device_changed": "기본 오디오 장치가 변경되었습니다. 기존 장치를 유지합니다. 새 장치로 녹음하려면 중지 후 다시 승인하세요.",
     "track_write_failed": "한 트랙 저장에 실패했습니다. 디스크 공간을 확인하세요. 녹음은 불완전할 수 있습니다.",
     "buffer_overflow": "오디오 버퍼 누락이 있습니다. metadata.json의 gaps를 확인하세요.",
-    "model_missing": "로컬 전사 모델이 없습니다. WAV는 보존했습니다. 모델 설치 후 전사를 재시도하세요.",
-    "engine_missing": "로컬 전사 엔진이 없습니다. Local 배포본 또는 전사 패키지를 설치하세요. WAV는 보존했습니다.",
+    "model_missing": "로컬 전사 모델이 없습니다. 녹음 파일은 보존했습니다. 모델 설치 후 전사를 재시도하세요.",
+    "engine_missing": "로컬 전사 엔진이 없습니다. Local 배포본 또는 전사 패키지를 설치하세요. 녹음 파일은 보존했습니다.",
     "transcription_complete": "전사를 완료했습니다. transcript.md를 확인하세요.",
     "recovery_finished": "복구 점검을 마쳤습니다. 원본 파일을 보존했습니다. 청취 후 전사를 재시도할 수 있습니다.",
     "no_audio_saved": "저장된 오디오가 없습니다. 장치와 권한을 확인하세요.",
     "track_has_no_samples": "이 트랙에 샘플이 없습니다. 무음 장치 또는 캡처 실패일 수 있습니다. 다른 트랙과 장치 상태를 확인하세요.",
     "device_monitor_unavailable": "장치 변경 감시를 사용할 수 없습니다. 입력/출력 장치를 바꿨다면 직접 중지 후 확인하세요.",
-    "processing_failed": "전사에 실패했습니다. WAV는 보존했습니다. 로컬 모델 또는 API 키·연결·사용 한도를 확인하세요.",
+    "processing_failed": "변환·검증·전사 또는 임시 파일 정리에 실패했습니다. 남은 원본은 보존했습니다. 저장 공간·모델·연결을 확인 후 재시도하세요.",
 }
 
 
@@ -88,7 +90,7 @@ class RecorderWindow(QMainWindow):
         self.history_at = float("-inf")
         self.history_signature = None
         self.setWindowTitle("Zoom Recorder · 로컬 녹음")
-        self.resize(560, 540)
+        self.resize(600, 800)
         self.setMinimumWidth(520)
         self.setWindowIcon(status_icon(False))
         self.setStyleSheet(STYLE)
@@ -157,9 +159,16 @@ class RecorderWindow(QMainWindow):
         folder_label.setBuddy(self.folder_name)
         consent_layout.addWidget(folder_label)
         consent_layout.addWidget(self.folder_name)
+        self.record_pc = QCheckBox("PC 소리 녹음 · Zoom 외 시스템 소리 포함")
+        self.record_mic = QCheckBox("마이크 녹음")
+        self.record_pc.setChecked(settings.record_pc)
+        self.record_mic.setChecked(settings.record_mic)
+        consent_layout.addWidget(self.record_pc)
+        consent_layout.addWidget(self.record_mic)
+        consent_layout.addWidget(QLabel("MP3 검증·필요 전사 완료 후 임시 WAV를 자동 삭제합니다."))
         self.consent = QCheckBox("회의 참석자에게 녹음 사실을 알렸고 동의를 받았습니다")
         consent_layout.addWidget(self.consent)
-        self.api_consent = QCheckBox("이 녹음의 PC 소리·마이크를 OpenAI에 전송하는 데 동의합니다")
+        self.api_consent = QCheckBox("이 녹음에서 선택한 음성을 OpenAI에 전송하는 데 동의합니다")
         self.api_consent.setToolTip("녹음 종료 후 전송하며 API 사용 요금이 발생합니다.")
         self.api_consent.toggled.connect(self.update_start_gate)
         consent_layout.addWidget(self.api_consent)
@@ -174,6 +183,8 @@ class RecorderWindow(QMainWindow):
         self.start_button.clicked.connect(self.start_recording)
         self.skip_button.clicked.connect(self.skip)
         self.consent.toggled.connect(self.update_start_gate)
+        self.record_pc.toggled.connect(self.update_start_gate)
+        self.record_mic.toggled.connect(self.update_start_gate)
         self.candidate_combo.currentIndexChanged.connect(self.update_start_gate)
         card_layout.addWidget(self.consent_panel)
         self.consent_panel.hide()
@@ -215,15 +226,22 @@ class RecorderWindow(QMainWindow):
         self.history_retry_button.clicked.connect(self.retry_selected)
         self.history_folder_button = QPushButton("폴더 열기")
         self.history_folder_button.clicked.connect(self.open_history_folder)
+        self.archive_retry_button = QPushButton("MP3 저장 재시도")
+        self.archive_retry_button.clicked.connect(self.retry_archive_selected)
         for button in (self.transcript_button, self.copy_transcript_button, self.history_retry_button, self.history_folder_button):
             actions.addWidget(button)
         layout.addLayout(actions)
+        layout.addWidget(self.archive_retry_button)
         self.warning = QLabel()
         self.warning.setWordWrap(True)
         self.warning.setObjectName("muted")
         layout.addWidget(self.warning)
         layout.addStretch()
-        self.setCentralWidget(root)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(root)
+        self.setCentralWidget(scroll)
         self.settings_dialog = PreferencesDialog(self)
         self.reminder_popup = ReminderPopup(self)
         self.tray = QSystemTrayIcon(status_icon(False), self)
@@ -288,7 +306,12 @@ class RecorderWindow(QMainWindow):
 
     def refresh_recovery(self):
         self.recovery_combo.clear()
-        directories = find_recovery(Path(self.settings.recordings_dir))
+        directories = []
+        for root in self.settings.recording_roots:
+            try:
+                directories.extend(find_recovery(root))
+            except OSError:
+                continue
         for directory in directories:
             self.recovery_combo.addItem(directory.name, directory)
         if directories and self.controller.manager.can_offer:
@@ -309,6 +332,8 @@ class RecorderWindow(QMainWindow):
             self.candidate_combo.addItem(candidate.label, candidate.key)
         self.candidate_combo.setVisible(len(candidates) > 1)
         self.consent.setChecked(False)
+        self.record_pc.setChecked(self.settings.record_pc)
+        self.record_mic.setChecked(self.settings.record_mic)
         self.api_consent.setChecked(False)
         self.api_consent.setVisible(self.settings.auto_transcribe and self.settings.transcription_backend == "openai")
         try:
@@ -324,6 +349,7 @@ class RecorderWindow(QMainWindow):
     def update_start_gate(self, *_):
         requires_api = self.settings.auto_transcribe and self.settings.transcription_backend == "openai"
         self.start_button.setEnabled(self.consent.isChecked() and self.candidate_combo.currentData() is not None
+                                     and (self.record_pc.isChecked() or self.record_mic.isChecked())
                                      and self.controller.manager.state == State.PROMPTED
                                      and (not requires_api or self.api_consent.isChecked()))
 
@@ -337,7 +363,8 @@ class RecorderWindow(QMainWindow):
     def start_recording(self):
         try:
             self.controller.start(self.candidate_combo.currentData(), self.consent.isChecked(), True,
-                                  api_approved=self.api_consent.isChecked(), folder_name=self.folder_name.text())
+                                  api_approved=self.api_consent.isChecked(), folder_name=self.folder_name.text(),
+                                  record_pc=self.record_pc.isChecked(), record_mic=self.record_mic.isChecked())
             self.banner.clear()
             self.stop_snooze_until = 0
             if self.controller.recorder:
@@ -424,10 +451,16 @@ class RecorderWindow(QMainWindow):
             return
         self.history_at = now
         try:
-            rows = recent_sessions(Path(self.settings.recordings_dir))
+            rows = []
+            for root in self.settings.recording_roots:
+                try:
+                    rows.extend(recent_sessions(root))
+                except OSError:
+                    continue
+            rows = sorted(rows, key=lambda row: row[0].name, reverse=True)[:30]
         except OSError:
             return
-        active = {task.store.directory: ("전사 중" if task.future.running() else "전사 대기")
+        active = {task.store.directory: ("저장·전사 처리 중" if task.future.running() else "처리 대기")
                   for task in self.controller.transcriptions}
         rows = [(p, duration, active.get(p, label), state) for p, duration, label, state in rows]
         if rows != self.history_signature:
@@ -460,6 +493,7 @@ class RecorderWindow(QMainWindow):
         self.history_retry_button.setEnabled(bool(path and not active and not recording_same
             and state in {"COMPLETE", "ERROR", "RECOVERY_REQUIRED"} and not self.controller.future
             and self.controller.manager.state not in {State.PROMPTED, State.FINALIZING}))
+        self.archive_retry_button.setEnabled(self.history_retry_button.isEnabled() and not self.controller.capture_busy)
 
     def open_transcript(self):
         path = self.selected_history_path()
@@ -485,6 +519,16 @@ class RecorderWindow(QMainWindow):
         if self.history_retry_button.isEnabled():
             self.retry(directory=self.selected_history_path())
 
+    def retry_archive_selected(self):
+        if not self.archive_retry_button.isEnabled():
+            return
+        try:
+            self.controller.retry_archive(SessionStore(self.selected_history_path()))
+        except (OSError, ValueError, RuntimeError) as error:
+            self.banner.setText(str(error))
+        self.refresh_history(force=True)
+        self.render()
+
     def recover(self):
         directory = self.recovery_combo.currentData()
         if directory and not self.controller.busy:
@@ -498,14 +542,14 @@ class RecorderWindow(QMainWindow):
         if not directory:
             return
         path = Path(directory).resolve()
-        if path.parent != Path(self.settings.recordings_dir).resolve() or not SESSION_NAME.fullmatch(path.name):
+        if path.parent not in self.settings.recording_roots or not SESSION_NAME.fullmatch(path.name):
             self.banner.setText("설정된 recordings 폴더 안의 세션을 선택하세요.")
             return
         try:
             api_approved = False
             if self.settings.transcription_backend == "openai":
                 api_approved = QMessageBox.question(
-                    self, "OpenAI 전송 동의", "선택한 녹음의 PC 소리와 마이크 WAV를 OpenAI에 전송합니다.\n"
+                    self, "OpenAI 전송 동의", "선택한 녹음에 포함된 개별 음성을 OpenAI에 전송합니다.\n"
                     "API 사용 요금이 발생합니다. 이 녹음을 전송할까요?\n" + path.name,
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
@@ -585,7 +629,8 @@ class RecorderWindow(QMainWindow):
                 label + ": " + ("▮" * min(10, max(1, int(snapshot.levels[name] ** 0.5 * 30)))
                                   if name in snapshot.levels and snapshot.levels[name] > 0.0001
                                   else "조용함" if name in snapshot.levels else "수신 확인 중")
-                for name, label in (("remote", "PC 소리"), ("mic", "마이크"))))
+                for name, label in (("remote", "PC 소리"), ("mic", "마이크"))
+                if name in self.controller.recorder.settings.selected_tracks))
         reminder_visible = recording and bool(self.reminder_label.text())
         self.reminder_label.setVisible(reminder_visible)
         if not recording:
@@ -594,7 +639,7 @@ class RecorderWindow(QMainWindow):
         self.continue_button.setVisible(reminder_visible or state == State.STOP_CONFIRM)
         running = sum(task.future.running() for task in self.controller.transcriptions)
         waiting = sum(not task.future.running() and not task.future.done() for task in self.controller.transcriptions)
-        self.processing_label.setText(f"백그라운드 전사 {running}건 · 대기 {waiting}건")
+        self.processing_label.setText(f"MP3 저장·전사 처리 {running}건 · 대기 {waiting}건")
         self.processing_label.setVisible(bool(self.controller.transcriptions))
         self.update_history_actions()
         interval = 250 if self.controller.busy else (2000 if self.detection_enabled else 5000)
@@ -613,7 +658,7 @@ class RecorderWindow(QMainWindow):
             return
         self._render_signature = signature
         self.recording_badge.setText("녹음 + 전사  ·  " + ("로컬" if self.settings.transcription_backend == "local" else "OpenAI API")
-                                    if self.settings.auto_transcribe else "녹음만  ·  WAV 저장")
+                                    if self.settings.auto_transcribe else "녹음만  ·  MP3 저장")
         self.warning.setText("PC 전체 소리와 마이크를 녹음하며, 다른 앱 소리도 포함됩니다.\n" +
                              ("API 전사 시 별도 동의 후 OpenAI에 오디오를 전송합니다." if self.settings.auto_transcribe and self.settings.transcription_backend == "openai"
                               else "파일은 이 PC에 저장됩니다. Zoom 공식 녹음과는 별개입니다."))
@@ -651,12 +696,14 @@ class RecorderWindow(QMainWindow):
                                 for name, info in list(store.metadata["tracks"].items()))
             partial = " · 불완전 녹음/누락 있음" if store.metadata["errors"] or store.metadata["gaps"] else ""
             if recording:
-                text = f"{elapsed // 60:02d}:{elapsed % 60:02d} · PC 소리 + 마이크{partial}"
+                selected = store.metadata.get("selected_tracks", ["remote", "mic"])
+                sources = " + ".join("PC 소리" if n == "remote" else "마이크" for n in selected)
+                text = f"{elapsed // 60:02d}:{elapsed % 60:02d} · {sources}{partial}"
             elif state == State.FINALIZING:
                 text = ("녹음 파일을 저장했습니다. 폴더명을 확인하세요." if self.controller.save_pending
                         else "녹음을 멈췄습니다. 파일 저장을 마무리하고 있습니다.")
             elif state == State.TRANSCRIBING:
-                text = "이전 녹음은 저장됐고 전사는 백그라운드에서 진행합니다. 다음 녹음을 시작할 수 있습니다."
+                text = "이전 녹음의 MP3 저장·전사를 처리 중입니다. 다음 녹음을 시작할 수 있습니다."
             elif state == State.COMPLETE:
                 text = "녹음 폴더에서 파일을 확인하세요." + partial
             elif state == State.PROMPTED:

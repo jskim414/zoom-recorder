@@ -206,5 +206,6 @@ def test_save_dialog_retries_then_cancel_preserves_audio(qt_app, tmp_path, monke
     window.stop_button.click()
     spin_until(lambda: (window.tick() or controller.manager.state == State.COMPLETE))
     assert len(calls) == 2 and controller.store.directory == original
-    assert len(list((original / "audio").glob("*.wav"))) == 2
+    assert len(list(original.glob("*.mp3"))) == 3
+    assert controller.store.metadata["archive"]["cleanup"] == "complete"
     cleanup(window)

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
                                QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from app.settings import save_settings
+from app.storage.locations import check_recording_root
 from app.processing.model_download import (MODEL_NAMES, ModelDownload, local_engine_available,
                                             missing_gpu_libraries, model_directory, model_installed)
 from app.startup import set_startup, startup_enabled
@@ -39,8 +40,8 @@ class PreferencesDialog(QDialog):
         self.auto_detect = QCheckBox("Zoom 회의 가능성을 감지하면 알림")
         self.auto_detect.setChecked(window.saved_settings.auto_detect)
         self.recording_mode = QComboBox()
-        self.recording_mode.addItem("녹음만 · WAV 저장", False)
-        self.recording_mode.addItem("녹음 + 전사 · WAV와 텍스트 저장", True)
+        self.recording_mode.addItem("녹음만 · MP3 저장", False)
+        self.recording_mode.addItem("녹음 + 전사 · MP3와 텍스트 저장", True)
         self.recording_mode.setCurrentIndex(int(window.saved_settings.auto_transcribe))
         self.startup = QCheckBox("Windows 로그인 시 앱 실행")
         self.initial_startup = False
@@ -72,10 +73,29 @@ class PreferencesDialog(QDialog):
         note = QLabel("앱이 자동 실행되어도 녹음은 꺼져 있습니다.\n매번 동의를 확인하고 시작을 눌러야 녹음합니다.")
         note.setWordWrap(True)
         form.addRow(note)
-        location = QLabel(str(window.settings.recordings_dir))
-        location.setWordWrap(True)
-        location.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        form.addRow("저장 위치", location)
+        self.recordings_path = QLineEdit(str(window.saved_settings.recordings_dir))
+        location_row = QHBoxLayout()
+        location_row.addWidget(self.recordings_path)
+        choose_location = QPushButton("폴더 선택")
+        choose_location.clicked.connect(self.choose_recordings)
+        location_row.addWidget(choose_location)
+        form.addRow("음성·전사 저장 위치", location_row)
+        form.addRow(QLabel("저장 위치 변경은 앱을 종료한 뒤 다시 열면 적용됩니다. 이전 녹음도 목록에서 확인할 수 있습니다."))
+        self.record_pc = QCheckBox("PC 소리 · 시스템 전체 출력")
+        self.record_mic = QCheckBox("마이크")
+        self.record_pc.setChecked(window.saved_settings.record_pc)
+        self.record_mic.setChecked(window.saved_settings.record_mic)
+        form.addRow("기본 녹음 대상", self.record_pc)
+        form.addRow(self.record_mic)
+        self.create_mix = QCheckBox("두 음성을 녹음하면 합본 MP3도 생성")
+        self.create_mix.setChecked(window.saved_settings.create_mix)
+        form.addRow("합본", self.create_mix)
+        policy = QLabel("개별 MP3를 128kbps로 저장합니다. 녹음 중에는 임시 WAV 공간이 필요합니다.\n"
+                        "MP3 검증과 필요한 전사가 끝나면 임시 WAV를 자동 삭제합니다. 실패·누락 시에는 보존합니다.")
+        policy.setWordWrap(True)
+        form.addRow(policy)
+        for label in general.findChildren(QLabel):
+            label.setWordWrap(True)
         general_scroll = QScrollArea()
         general_scroll.setWidgetResizable(True)
         general_scroll.setWidget(general)
@@ -144,7 +164,7 @@ class PreferencesDialog(QDialog):
         self.quality.setCurrentIndex(self.quality.findData(window.saved_settings.beam_size))
         form.addRow("처리 수준", self.quality)
         self.api_note = QLabel("OPENAI_API_KEY 환경변수: " + ("설정됨" if os.environ.get("OPENAI_API_KEY") else "미설정") +
-                              "\n키는 앱 설정이나 배포 파일에 저장하지 않습니다.\nAPI는 인터넷과 별도 사용 요금이 필요합니다.\n전송 대상: PC 전체 소리와 마이크 WAV · OpenAI\nAPI 시간 표시는 최대 30초 조각 기준입니다.")
+                              "\n키는 앱 설정이나 배포 파일에 저장하지 않습니다.\nAPI는 인터넷과 별도 사용 요금이 필요합니다.\n전송 대상: 선택한 개별 녹음 음성 · OpenAI\nAPI 시간 표시는 최대 30초 조각 기준입니다.")
         self.api_note.setWordWrap(True)
         form.addRow(self.api_note)
         transcription_scroll = QScrollArea()
@@ -205,7 +225,7 @@ class PreferencesDialog(QDialog):
         window.quit_button.clicked.connect(window.quit)
         support_layout.addWidget(window.quit_button)
         tabs.addTab(support, "상태 및 복구")
-        self.message = QLabel("녹음·전사 설정은 저장 즉시 적용됩니다. 감지·브라우저 설정은 재시작 후 적용됩니다.")
+        self.message = QLabel("녹음 대상·전사는 저장 즉시, 저장 위치·감지·브라우저 설정은 재시작 후 적용됩니다.")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
         actions = QHBoxLayout()
@@ -315,6 +335,11 @@ class PreferencesDialog(QDialog):
             self.model_choice.setCurrentIndex(self.model_choice.findData("custom"))
             self.model.setText(directory)
 
+    def choose_recordings(self):
+        directory = QFileDialog.getExistingDirectory(self, "음성·전사 저장 폴더", self.recordings_path.text())
+        if directory:
+            self.recordings_path.setText(directory)
+
     def save(self):
         if self.window.controller.busy or self.window.controller.manager.state.value == "PROMPTED":
             self.message.setText("녹음과 처리가 끝난 뒤 설정을 저장하세요.")
@@ -322,6 +347,9 @@ class PreferencesDialog(QDialog):
         changed_startup = False
         try:
             updated = replace(self.window.saved_settings,
+                              recordings_dir=self.recordings_path.text().strip(),
+                              record_pc=self.record_pc.isChecked(), record_mic=self.record_mic.isChecked(),
+                              create_mix=self.create_mix.isChecked(),
                               auto_detect=self.auto_detect.isChecked(),
                               silence_seconds=self.silence.currentData(),
                               reminder_foreground=self.foreground.isChecked(),
@@ -332,6 +360,11 @@ class PreferencesDialog(QDialog):
                               model=self.model.text().strip(), device=self.device.currentData(),
                               extension_ids=[value.strip() for value in self.extension_ids.text().split(",") if value.strip()],
                               bridge_port=self.port.value()).validate()
+            updated.recordings_dir = str(check_recording_root(updated.recordings_dir))
+            previous = list(self.window.saved_settings.previous_recordings_dirs)
+            previous.append(str(Path(self.window.settings.recordings_dir).resolve()))
+            updated.previous_recordings_dirs = list(dict.fromkeys(
+                str(Path(p).resolve()) for p in previous if Path(p).resolve() != Path(updated.recordings_dir)))
             if self.startup.isEnabled() and self.startup.isChecked() != self.initial_startup:
                 set_startup(self.startup.isChecked())
                 changed_startup = True
@@ -349,13 +382,14 @@ class PreferencesDialog(QDialog):
         self.window.saved_settings = updated
         # Recording settings can be applied safely between sessions. Detector transport stays fixed until restart.
         for name in ("auto_transcribe", "transcription_backend", "model", "device", "cpu_threads", "beam_size",
-                     "silence_seconds", "reminder_foreground", "long_recording_minutes"):
+                     "silence_seconds", "reminder_foreground", "long_recording_minutes",
+                     "record_pc", "record_mic", "create_mix"):
             setattr(self.window.settings, name, getattr(updated, name))
             setattr(self.window.controller.settings, name, getattr(updated, name))
         if self.window.poc:
             self.window.settings.auto_transcribe = False
             self.window.controller.settings.auto_transcribe = False
-        self.message.setText("저장했습니다. 녹음·전사 설정을 적용했습니다. 감지·브라우저 변경은 앱을 다시 열어 주세요.")
+        self.message.setText("저장했습니다. 녹음 대상·전사 설정을 적용했습니다. 저장 위치·감지·브라우저 변경은 앱을 종료 후 다시 열어 주세요.")
         if updated.transcription_backend == "local" and not model_installed(updated.model):
             self.message.setText("설정을 저장했습니다. 선택한 모델을 다운로드해야 전사할 수 있습니다. 녹음 파일은 보존됩니다.")
         self.window.banner.setText("환경설정을 저장했습니다.")

@@ -60,7 +60,9 @@ def test_record_only_never_constructs_transcriber(tmp_path):
     spin_until(lambda: (controller.poll() or controller.manager.state == State.COMPLETE))
     assert controller.future is None
     assert controller.store.metadata["transcription"]["status"] == "disabled"
-    assert list((controller.store.directory / "audio").glob("*.wav"))
+    assert not list((controller.store.directory / "audio").glob("*.wav"))
+    assert len(list(controller.store.directory.glob("*.mp3"))) == 3
+    assert controller.store.metadata["archive"]["cleanup"] == "complete"
     controller.close()
 
 

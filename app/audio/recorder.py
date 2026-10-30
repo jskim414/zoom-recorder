@@ -24,7 +24,7 @@ class Recorder:
         self.thread = None
         self.origin = store.metadata["monotonic_start"]
         self.tracks = {}
-        self.activity = SpeechMonitor(self.origin, self.events)
+        self.activity = SpeechMonitor(self.origin, self.events, settings.selected_tracks)
 
     def start(self):
         if self.thread is not None:
@@ -118,6 +118,8 @@ class Recorder:
             selectors = {"remote": lambda: select_loopback(pa),
                          "mic": lambda: select_microphone(pa, module.paWASAPI, self.settings.microphone_index)}
             for name, select in selectors.items():
+                if name not in self.settings.selected_tracks:
+                    continue
                 if self.stop_requested.is_set():
                     break
                 try:

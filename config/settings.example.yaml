@@ -1,4 +1,8 @@
 recordings_dir: recordings
+previous_recordings_dirs: []
+record_pc: true
+record_mic: true
+create_mix: true
 segment_seconds: 120
 stable_seconds: 7
 end_grace_seconds: 30

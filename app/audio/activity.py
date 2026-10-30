@@ -13,8 +13,9 @@ class ActivitySnapshot:
 
 
 class SpeechMonitor:
-    def __init__(self, origin, events):
+    def __init__(self, origin, events, tracks=("remote", "mic")):
         self.origin = origin
+        self.tracks = tuple(tracks)
         self.events = events
         self.queue = queue.Queue(maxsize=32)
         self.closed = threading.Event()
@@ -41,7 +42,7 @@ class SpeechMonitor:
         now = time.monotonic() if now is None else now
         with self.lock:
             healthy = not self.failed and all(0 <= now - self.observed.get(n, float("-inf")) < 2
-                                              for n in ("remote", "mic"))
+                                              for n in self.tracks)
             levels = {n: v for n, v in self.levels.items() if now - self.observed.get(n, 0) < 2}
             return ActivitySnapshot(self.last_speech, levels, healthy)
 
@@ -55,7 +56,7 @@ class SpeechMonitor:
             # Lazy imports keep idle UI lightweight. WebRTC accepts 20 ms mono PCM16.
             import numpy as np
             import webrtcvad
-            detectors = {name: webrtcvad.Vad(2) for name in ("remote", "mic")}
+            detectors = {name: webrtcvad.Vad(2) for name in self.tracks}
             buffers = {name: b"" for name in detectors}
             positions = {}
             voiced = {name: 0 for name in detectors}

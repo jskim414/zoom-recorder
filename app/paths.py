@@ -10,7 +10,11 @@ def source_root():
 
 def workspace_root():
     root = source_root()
-    return root.parent if (root.parent / ".zoom-workspace").is_file() else root
+    if (root.parent / ".zoom-workspace").is_file():
+        return root.parent
+    if root.parent.name == "worktrees" and (root.parent.parent / ".zoom-workspace").is_file():
+        return root.parent.parent
+    return root
 
 
 def data_root():

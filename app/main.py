@@ -4,7 +4,7 @@ import sys
 import time
 
 from app.settings import load_settings
-from app.storage.instance_lock import InstanceAlreadyRunning, InstanceLock
+from app.storage.instance_lock import InstanceAlreadyRunning, RecordingRootsLock
 from app.storage.session_store import SESSION_NAME, SessionStore, apply_retention, recover_session
 
 
@@ -24,6 +24,7 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--recover", type=Path)
     mode.add_argument("--transcribe", type=Path)
+    mode.add_argument("--archive", type=Path, help="Retry local MP3 export/temporary WAV cleanup for a new session")
     args = parser.parse_args(argv)
     app = None
     try:
@@ -34,7 +35,7 @@ def main(argv=None):
             return 0
         settings = load_settings(args.config)
         root = Path(settings.recordings_dir).resolve()
-        if not (args.recover or args.transcribe):
+        if not (args.recover or args.transcribe or args.archive):
             if sys.platform != "win32":
                 raise RuntimeError("실제 녹음 앱은 Windows 11에서 실행하세요.")
             from PySide6.QtWidgets import QApplication
@@ -43,17 +44,21 @@ def main(argv=None):
             app.setQuitOnLastWindowClosed(False)
             if not args.background and reveal_existing(root):
                 return 0
-        with InstanceLock(root):
-            if args.recover or args.transcribe:
-                directory = (args.recover or args.transcribe).resolve()
-                if directory.parent != root or not SESSION_NAME.fullmatch(directory.name):
+        with RecordingRootsLock(root, settings.previous_recordings_dirs):
+            if args.recover or args.transcribe or args.archive:
+                directory = (args.recover or args.transcribe or args.archive).resolve()
+                if directory.parent not in settings.recording_roots or not SESSION_NAME.fullmatch(directory.name):
                     raise ValueError("Select a session directly inside recordings_dir")
                 if args.recover:
                     result = recover_session(directory)
                     print(f"Recovered {len(result['recovered'])} files; inspect metadata.json before retrying transcription.")
                 else:
-                    from app.processing.transcribe import Transcriber
-                    print(Transcriber(settings).run(SessionStore(directory), api_approved=args.approve_api_upload))
+                    store = SessionStore(directory)
+                    if store.metadata.get("state") not in {"COMPLETE", "ERROR", "RECOVERY_REQUIRED"}:
+                        raise ValueError("Recover interrupted sessions before retrying; never process live recordings")
+                    from app.processing.worker import ProcessTranscriber, ProcessArchiver
+                    worker = ProcessArchiver(settings) if args.archive else ProcessTranscriber(settings)
+                    print(worker.run(store, api_approved=args.approve_api_upload))
                 return 0
             apply_retention(root, settings.retention_days)
             from app.startup import migrate_startup

@@ -27,3 +27,12 @@ def test_independent_clone_needs_no_parent_documents(tmp_path, monkeypatch):
     assert paths.distribution_root() == source / "dist"
     custom = str(tmp_path / "custom-model")
     assert paths.resolve_settings_paths(Settings(model=custom)).model == custom
+
+
+def test_isolated_worktree_reuses_workspace_models_and_logs(tmp_path, monkeypatch):
+    (tmp_path / ".zoom-workspace").touch()
+    source = tmp_path / "worktrees/audio-storage"
+    source.mkdir(parents=True)
+    monkeypatch.setattr(paths, "source_root", lambda: source)
+    assert paths.data_root() == tmp_path / "data"
+    assert paths.logs_root() == tmp_path / "logs"

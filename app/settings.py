@@ -7,6 +7,10 @@ import re
 @dataclass
 class Settings:
     recordings_dir: str = "recordings"
+    previous_recordings_dirs: list[str] = field(default_factory=list)
+    record_pc: bool = True
+    record_mic: bool = True
+    create_mix: bool = True
     segment_seconds: int = 120
     stable_seconds: float = 7.0
     end_grace_seconds: float = 30.0
@@ -30,6 +34,14 @@ class Settings:
     meeting_title_patterns: list[str] = field(default_factory=lambda: [r"zoom meeting", r"zoom 회의", r"zoom 미팅", r"zoom workplace.*meeting"])
 
     def validate(self):
+        for name in ("record_pc", "record_mic", "create_mix"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be boolean")
+        if not (self.record_pc or self.record_mic):
+            raise ValueError("PC 소리 또는 마이크를 하나 이상 선택하세요.")
+        if (not isinstance(self.previous_recordings_dirs, list)
+                or any(not isinstance(p, str) or not p.strip() for p in self.previous_recordings_dirs)):
+            raise ValueError("Invalid previous recordings directories")
         if type(self.silence_seconds) is not int or self.silence_seconds not in {0, 120, 300, 600}:
             raise ValueError("silence_seconds must be 0, 120, 300 or 600")
         if type(self.long_recording_minutes) is not int or self.long_recording_minutes not in {0, 30, 60, 120}:
@@ -73,6 +85,14 @@ class Settings:
         for pattern in self.meeting_title_patterns:
             re.compile(pattern)
         return self
+
+    @property
+    def selected_tracks(self):
+        return tuple(name for name, enabled in (("remote", self.record_pc), ("mic", self.record_mic)) if enabled)
+
+    @property
+    def recording_roots(self):
+        return list(dict.fromkeys(Path(p).resolve() for p in [self.recordings_dir, *self.previous_recordings_dirs]))
 
 
 def load_settings(path: str | Path | None = None) -> Settings:

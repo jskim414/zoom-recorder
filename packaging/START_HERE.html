@@ -7,7 +7,7 @@
 body{margin:0;background:#f3f6fc;color:#18283f;font:17px/1.8 "Malgun Gothic",sans-serif}main{max-width:820px;margin:40px auto;padding:36px;background:white;border-radius:20px}h1{font-size:36px;margin:0}h2{font-size:23px;margin-top:35px}p{margin:10px 0}li{margin:8px 0}.badge{color:#2959d9;font-weight:bold}.note{padding:18px;background:#edf3ff;border-radius:12px}code{background:#f1f4f8;padding:3px 6px;overflow-wrap:anywhere}table{border-collapse:collapse;width:100%}td,th{padding:12px;text-align:left;border-bottom:1px solid #dde3ef}footer{font-size:14px;color:#566579;margin-top:35px}@media(max-width:650px){main{margin:12px;padding:22px}h1{font-size:29px}}
 </style>
 <main>
-<p class="badge">ZOOM RECORDER · WINDOWS 11 · 0.3.0</p>
+<p class="badge">ZOOM RECORDER · WINDOWS 11 · 0.4.0</p>
 <h1>회의를 녹음하고, 글로 남기세요.</h1>
 <p>Python·Git·터미널·CLI AI 에이전트 없이 사용할 수 있는 데스크톱 앱입니다.</p>
 <h2>1. 압축을 풀고 앱 열기</h2>
@@ -17,6 +17,10 @@ body{margin:0;background:#f3f6fc;color:#18283f;font:17px/1.8 "Malgun Gothic",san
 <ol><li>앱에서 <strong>녹음 시작</strong>을 누릅니다.</li><li>참석자에게 녹음 사실을 알리고 동의를 확인한 뒤 체크합니다.</li><li><strong>동의하고 녹음 시작</strong>을 누릅니다. 시작 클릭 전에는 녹음하지 않습니다.</li><li>회의가 끝나면 <strong>녹음 중지</strong>를 누르고 저장 폴더명을 확인합니다.</li><li><strong>녹음 폴더 보기</strong>에서 저장한 파일을 확인합니다.</li></ol>
 <div class="note"><strong>처음에는 녹음만 합니다.</strong> 계정이나 API 키가 필요 없습니다. PC 전체 소리와 마이크를 저장하므로 다른 앱 소리도 포함될 수 있습니다.</div>
 <h2>3. 전사 켜기 — Local 앱</h2>
+<p><strong>저장 위치:</strong> 환경설정 → 일반 → 폴더 선택으로 지정하고 앱을 완전히 종료한 뒤 다시 실행하세요. 이전 녹음도 최근 회의에 표시됩니다.</p>
+<p><strong>녹음 대상:</strong> 시작 화면에서 PC 소리 / 마이크를 선택합니다. 기본은 둘 다입니다. PC 소리는 시스템 전체 출력을 포함합니다.</p>
+<p><strong>MP3 저장:</strong> 선택한 음성의 개별 MP3와 선택적 합본을 128kbps로 생성합니다. 녹음 중 임시 WAV 공간이 필요하며, MP3 검증과 필요한 전사가 끝나면 해당 WAV를 자동 삭제합니다. 실패·누락 시에는 보존합니다. 최근 회의의 MP3 저장 재시도로 다시 처리할 수 있습니다.</p>
+<p>전사는 개별 음성으로 수행하며 PC 음성 / 마이크로 표시합니다. 이는 입력 출처 구분이며 사람별 화자 식별이 아닙니다.</p>
 <ol><li><strong>환경설정 → 일반 → 녹음 + 전사</strong>를 선택합니다.</li><li><strong>전사</strong> 탭에서 <strong>이 PC에서 처리 · 로컬 / CPU / small</strong>을 선택합니다.</li><li><strong>선택 모델 다운로드</strong>를 누릅니다. 처음 한 번 인터넷이 필요하며 녹음을 전송하지 않습니다.</li><li>설치됨 표시를 확인한 뒤 <strong>설정 저장</strong>을 누릅니다.</li></ol>
 <p>이후 녹음이 끝나면 이 PC에서 글로 바꿉니다. 설치된 모델로는 오프라인 전사도 가능합니다. <strong>이전 회의 전사 중에도 새 녹음을 시작</strong>할 수 있으며, 전사는 한 건씩 처리합니다.</p>
 <p>GPU는 별도 호환 환경이 필요합니다. 처음에는 CPU로 사용하세요. Lite는 로컬 전사 엔진이 없으므로 Local ZIP을 받으세요. API 방식은 별도 키·전송 동의와 요금이 필요합니다.</p>
@@ -28,8 +32,8 @@ body{margin:0;background:#f3f6fc;color:#18283f;font:17px/1.8 "Malgun Gothic",san
 <p>녹음과 전사문: <code>%LOCALAPPDATA%\ZoomRecorder\recordings</code><br>앱의 <strong>녹음 폴더 보기</strong>로 여세요. 설정·모델은 같은 ZoomRecorder 데이터 폴더에 있습니다.</p>
 <p>업데이트는 작업을 마치고 앱을 종료한 뒤 새 ZIP을 <strong>새 폴더에 전부</strong> 풀어 실행하세요. 개인 녹음과 설정은 유지됩니다. 앱 파일을 제거해도 개인 데이터는 자동 삭제되지 않습니다.</p>
 <h2>문제가 생겼다면</h2>
-<ul><li><strong>장치 오류:</strong> Windows 소리 설정과 마이크 접근 권한을 확인하세요. 한쪽 트랙만 저장되었을 수 있으므로 두 WAV를 확인하세요.</li><li><strong>전사 실패:</strong> 원본 WAV는 보존합니다. 모델 설치 상태를 확인하고 최근 회의에서 재시도하세요.</li><li><strong>강제 종료:</strong> 환경설정 → 상태 및 복구에서 복구를 확인하세요. 자동 재녹음·재전송하지 않습니다.</li><li><strong>Windows 실행 차단:</strong> 배포본은 코드 서명되지 않았습니다. 다운로드 출처와 SHA-256을 확인하고 조직 담당자에게 문의하세요. 보안 기능을 해제하지 마세요.</li></ul>
-<p>먼저 짧게 녹음해 PC 소리와 마이크 WAV를 각각 청취하세요. 장시간 회의 및 장치별 감지 정확도는 직접 확인이 필요합니다.</p>
+<ul><li><strong>장치 오류:</strong> Windows 소리 설정과 마이크 접근 권한을 확인하세요. 한쪽 음성만 저장되었을 수 있으므로 남은 WAV와 오류 표시를 확인하세요.</li><li><strong>변환·전사 실패:</strong> 남은 원본을 보존합니다. 공간·모델 설치 상태를 확인하고 최근 회의에서 재시도하세요.</li><li><strong>강제 종료:</strong> 환경설정 → 상태 및 복구에서 복구를 확인하세요. 자동 재녹음·재전송하지 않습니다.</li><li><strong>Windows 실행 차단:</strong> 배포본은 코드 서명되지 않았습니다. 다운로드 출처와 SHA-256을 확인하고 조직 담당자에게 문의하세요. 보안 기능을 해제하지 마세요.</li></ul>
+<p>먼저 짧게 녹음해 선택한 음성의 MP3를 각각 청취하세요. 장시간 회의 및 장치별 감지 정확도는 직접 확인이 필요합니다.</p>
 <footer>Zoom 공식 녹음 기능과 별개이며 Zoom과 제휴한 제품이 아닙니다.<br>자세한 안내: 같은 폴더의 README.md · 포함 라이브러리: THIRD_PARTY_LICENSES</footer>
 </main>
 </html>

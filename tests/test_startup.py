@@ -43,3 +43,20 @@ def test_startup_shortcut_migration_preserves_manual_launcher(tmp_path, monkeypa
     assert not startup.migrate_startup()
     with pytest.raises(RuntimeError):
         startup.set_startup(True)
+
+
+def test_shared_interpreter_shortcut_preserves_explicit_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(startup, "PROJECT_ROOT", tmp_path / "checkout")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    interpreter = tmp_path / "shared/python.exe"
+    interpreter.parent.mkdir()
+    interpreter.touch()
+    interpreter.with_name("pythonw.exe").touch()
+    monkeypatch.setattr(sys, "executable", str(interpreter))
+    config = tmp_path / "settings with spaces.yaml"
+    monkeypatch.setattr(sys, "argv", ["app.main", "--config", str(config)])
+    link = tmp_path / "launch.lnk"
+    startup.create_shortcut(link, background=True)
+    actual = Dispatch("WScript.Shell").CreateShortcut(str(link))
+    assert actual.TargetPath == str(interpreter.with_name("pythonw.exe"))
+    assert str(config) in actual.Arguments and "--background" in actual.Arguments

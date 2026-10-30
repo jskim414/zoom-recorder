@@ -18,7 +18,7 @@ def render_markdown(metadata: dict, segments: list[dict]) -> str:
     if metadata.get("transcription", {}).get("backend") == "openai":
         lines.extend(["> OpenAI API 전사 · 시간은 최대 30초 오디오 조각의 범위이며 발화 시각이 아닙니다. 조각 경계에서 문맥이 끊길 수 있습니다.", ""])
     for item in sorted(segments, key=lambda s: (s["start"], s["track"])):
-        label = "시스템 출력" if item["track"] == "remote" else "마이크"
+        label = "PC 음성 · 시스템 출력" if item["track"] == "remote" else "마이크"
         # Render recognizer output as text, never as HTML/links/embedded Markdown.
         text = html.escape(" ".join(item["text"].split()))
         for char in ("\\", "*", "_", "[", "]", "`", "#", "!"):

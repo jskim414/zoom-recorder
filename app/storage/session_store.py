@@ -245,6 +245,10 @@ def recover_session(directory: Path) -> dict:
         # Validate completed files without altering them.
         for item in store.metadata["segments"]:
             try:
+                if item.get("codec") == "MP3":
+                    from app.processing.archive import verify_mp3
+                    verify_mp3(safe_child(directory, item["file"]), item["frames"], item["sha256"])
+                    continue
                 with wave.open(str(safe_child(directory, item["file"])), "rb") as f:
                     expected = item["frames"] * f.getnchannels() * f.getsampwidth()
                     actual = 0

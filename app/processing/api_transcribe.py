@@ -8,6 +8,7 @@ import wave
 
 from app.audio.validation import inspect_wav
 from app.storage.session_store import safe_child
+from app.processing.archive import source_items, reference_file
 
 API_MODEL = "gpt-transcribe"
 
@@ -51,17 +52,25 @@ def transcribe_api(store, *, approved=False, upload=None):
         raise RuntimeError("OPENAI_API_KEY를 설정하고 앱을 다시 실행하세요.")
     inputs = []
     # Validate the complete session before transmitting even one chunk.
-    for item in sorted(store.metadata["segments"], key=lambda s: (s["offset"], s["track"])):
+    for item in source_items(store):
         path = safe_child(store.directory, item["file"])
-        if path.suffix != ".wav":
-            raise ValueError("Only WAV segments can be transcribed")
+        if path.suffix not in {".wav", ".mp3"}:
+            raise ValueError("Only WAV or verified MP3 can be transcribed")
         if not item["frames"]:
             continue
-        inspect_wav(path, item)
+        if path.suffix == ".wav":
+            inspect_wav(path, item)
         inputs.append((item, path))
     result = []
     upload = upload or upload_chunk
     for item, path in inputs:
+        if path.suffix == ".mp3":
+            for offset, frames, audio in mp3_chunks(path):
+                text = upload(audio, key)
+                if text:
+                    result.append({"track": item["track"], "file": reference_file(store, item),
+                                   "start": offset / 16000, "end": (offset + frames) / 16000, "text": text})
+            continue
         with wave.open(str(path), "rb") as source:
             rate, channels, width = source.getframerate(), source.getnchannels(), source.getsampwidth()
             # At most 30 s / 4 MB per request; bounded memory even for high-rate WAV.
@@ -77,8 +86,40 @@ def transcribe_api(store, *, approved=False, upload=None):
                     output.writeframes(pcm)
                 text = upload(buffer.getvalue(), key)
                 if text:
-                    result.append({"track": item["track"], "file": item["file"],
+                    result.append({"track": item["track"], "file": reference_file(store, item),
                                    "start": item["offset"] + offset / rate,
                                    "end": item["offset"] + (offset + frames) / rate, "text": text})
                 offset += frames
     return result
+
+
+def mp3_chunks(path, seconds=30):
+    """Decode locally into bounded 30-second WAV requests; never upload the mix."""
+    import av
+    pending = bytearray()
+    offset = 0
+    chunk_frames = 16000 * seconds
+    chunk_bytes = chunk_frames * 2
+    def pack(pcm):
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(pcm)
+        return buffer.getvalue()
+    with av.open(str(path)) as source:
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+        def frames():
+            for frame in source.decode(audio=0):
+                yield from resampler.resample(frame)
+            yield from resampler.resample(None)
+        for frame in frames():
+            pending.extend(frame.to_ndarray().tobytes())
+            while len(pending) >= chunk_bytes:
+                pcm = bytes(pending[:chunk_bytes])
+                del pending[:chunk_bytes]
+                yield offset, chunk_frames, pack(pcm)
+                offset += chunk_frames
+    if pending:
+        yield offset, len(pending) // 2, pack(bytes(pending))

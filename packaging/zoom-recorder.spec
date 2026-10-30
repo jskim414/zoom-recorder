@@ -11,14 +11,16 @@ hidden = ["win32timezone", "win32com.client", "comtypes", "pycaw.pycaw"]
 hidden += collect_submodules("comtypes", filter=lambda name: not name.startswith("comtypes.test"))
 excluded = ["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtQml", "PySide6.QtQuick",
             "tkinter", "pytest", "torch", "scipy", "matplotlib", "IPython"]
+packages = ["av"]
 if local:
-    for package in ("faster_whisper", "ctranslate2", "tokenizers", "onnxruntime", "av"):
+    packages += ["faster_whisper", "ctranslate2", "tokenizers", "onnxruntime"]
+for package in packages:
         d, b, h = collect_all(package)
         datas += d
         binaries += b
         hidden += h
-else:
-    excluded += ["faster_whisper", "ctranslate2", "tokenizers", "onnxruntime", "av", "huggingface_hub"]
+if not local:
+    excluded += ["faster_whisper", "ctranslate2", "tokenizers", "onnxruntime", "huggingface_hub"]
 a = Analysis([str(root / "scripts/package_entry.py")], pathex=[str(root)],
              binaries=binaries, datas=datas, hiddenimports=hidden, excludes=excluded,
              hookspath=[str(root / "packaging/hooks")])

@@ -37,6 +37,13 @@ def recent_sessions(root: Path, limit=30):
                 label = "오류 확인 필요"
             else:
                 label = "녹음 저장됨"
+            archive = metadata.get("archive", {})
+            if archive.get("status") == "building":
+                label = "MP3 변환 재시도 필요"
+            elif archive.get("cleanup") == "retained":
+                label += " · 임시 WAV 보존"
+            elif archive.get("cleanup") in {"pending", "deleting"}:
+                label += " · MP3 저장 마무리 필요"
             if metadata.get("errors") or metadata.get("gaps"):
                 label += " · 누락/오류 확인"
             result.append((directory, duration, label, state))

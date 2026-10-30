@@ -1,4 +1,5 @@
 import os
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -43,3 +44,25 @@ class InstanceLock:
                 import fcntl
                 fcntl.flock(self.file, fcntl.LOCK_UN)
             self.file.close()
+
+
+class RecordingRootsLock:
+    """Protect previous locations too, before history/recovery can inspect them."""
+    def __init__(self, current, previous):
+        self.current = Path(current).resolve()
+        self.previous = previous
+        self.stack = ExitStack()
+
+    def __enter__(self):
+        try:
+            self.stack.enter_context(InstanceLock(self.current))
+            for root in sorted(set(Path(p).resolve() for p in self.previous)):
+                if root != self.current and root.is_dir():
+                    self.stack.enter_context(InstanceLock(root))
+        except BaseException:
+            self.stack.close()
+            raise
+        return self
+
+    def __exit__(self, *args):
+        return self.stack.__exit__(*args)

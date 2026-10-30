@@ -5,7 +5,7 @@ from pathlib import Path
 import wave
 
 from app.audio.validation import inspect_wav
-from app.storage.session_store import safe_child
+from app.storage.session_store import safe_child, SessionStore
 
 
 def inspect_session(directory: Path) -> dict:
@@ -27,18 +27,29 @@ def inspect_session(directory: Path) -> dict:
             if item["file"] in seen:
                 raise ValueError("Duplicate segment entry")
             seen.add(item["file"])
-            row.update(inspect_wav(safe_child(directory, item["file"]), item))
+            if item.get("codec") == "MP3":
+                from app.processing.archive import verify_mp3
+                verify_mp3(safe_child(directory, item["file"]), item["frames"], item["sha256"])
+                row.update(duration=item["duration"], frames=item["frames"], codec="MP3")
+            else:
+                row.update(inspect_wav(safe_child(directory, item["file"]), item))
             tracks.add(item["track"])
-            if row["all_zero"]:
+            if row.get("all_zero"):
                 report["warnings"].append(f"All-zero audio: {item['file']}")
-            if row["clipped_fraction"] > 0.001:
+            if row.get("clipped_fraction", 0) > 0.001:
                 report["warnings"].append(f"Possible clipping: {item['file']}")
         except (OSError, ValueError, KeyError, EOFError, wave.Error) as error:
             row["error"] = str(error)
-            report["issues"].append(f"Invalid WAV: {item['file']}")
+            report["issues"].append(f"Invalid audio: {item['file']}")
         report["segments"].append(row)
-    if tracks != {"remote", "mic"}:
-        report["issues"].append("Both valid remote and mic tracks are required")
+    if tracks != set(metadata.get("selected_tracks", ["remote", "mic"])):
+        report["issues"].append("All selected tracks must contain valid audio")
+    if metadata.get("archive", {}).get("status") == "verified":
+        try:
+            from app.processing.archive import validate_archive
+            validate_archive(SessionStore(directory))
+        except (OSError, ValueError, KeyError):
+            report["issues"].append("MP3 archive validation failed")
     for track in sorted(tracks):
         rows = sorted((row for row in report["segments"] if row["track"] == track and "error" not in row),
                       key=lambda row: row["offset"])

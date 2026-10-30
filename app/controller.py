@@ -7,7 +7,8 @@ import queue
 
 from app.audio.recorder import Recorder
 from app.detection.session_manager import SessionManager, State
-from app.processing.worker import ProcessTranscriber
+from app.processing.worker import ProcessTranscriber, ProcessArchiver
+from app.storage.locations import check_recording_root
 from app.storage.session_store import SessionStore, available_session_path, recover_session, utc_now
 
 
@@ -15,15 +16,18 @@ from app.storage.session_store import SessionStore, available_session_path, reco
 class TranscriptionJob:
     store: SessionStore
     future: object
+    transcribe: bool = True
 
 
 class Controller:
     """Application orchestration independent of Qt, with injectable recording/transcription."""
-    def __init__(self, settings, recorder_factory=Recorder, transcriber_factory=ProcessTranscriber):
+    def __init__(self, settings, recorder_factory=Recorder, transcriber_factory=ProcessTranscriber,
+                 archive_factory=ProcessArchiver):
         self.settings = settings
         self.manager = SessionManager()
         self.recorder_factory = recorder_factory
         self.transcriber_factory = transcriber_factory
+        self.archive_factory = archive_factory
         self.recorder = None
         self.store = None
         self.future = None
@@ -48,7 +52,8 @@ class Controller:
     def processing(self, directory):
         return any(job.store.directory == Path(directory).resolve() for job in self.transcriptions)
 
-    def start(self, key, checked, explicit_click, *, api_approved=False, folder_name=None):
+    def start(self, key, checked, explicit_click, *, api_approved=False, folder_name=None,
+              record_pc=None, record_mic=None):
         if self.capture_busy:
             raise RuntimeError("녹음 저장이 끝난 뒤 시작하세요.")
         requires_api = self.settings.auto_transcribe and self.settings.transcription_backend == "openai"
@@ -56,8 +61,15 @@ class Controller:
             raise PermissionError("OpenAI에 녹음 파일을 전송하려면 별도 동의가 필요합니다.")
         if folder_name is not None:
             available_session_path(Path(self.settings.recordings_dir), folder_name)
+        options = replace(self.settings,
+                          record_pc=self.settings.record_pc if record_pc is None else record_pc,
+                          record_mic=self.settings.record_mic if record_mic is None else record_mic).validate()
+        # Consent is checked before creating storage or opening any device.
+        from app.detection.session_manager import ConsentGate
+        ConsentGate.confirm(checked, explicit_click)
+        check_recording_root(options.recordings_dir)
         self.manager.approve(key, checked, explicit_click)
-        self.session_settings = replace(self.settings)
+        self.session_settings = options
         self.save_pending = False
         self.api_approved = requires_api and api_approved is True
         self.store = None
@@ -65,6 +77,10 @@ class Controller:
         try:
             self.store = SessionStore.create(Path(self.settings.recordings_dir), self.manager.selected.source,
                                              self.manager.consent_at, folder_name)
+            self.store.update(selected_tracks=list(options.selected_tracks),
+                              storage_policy={"temporary_wav": True, "create_mix": options.create_mix,
+                                              "transcribe_required": options.auto_transcribe},
+                              capture_scope="system_output_all_apps" if options.record_pc else "microphone_only")
             if self.api_approved:
                 self.store.log("api_upload_approved", provider="openai", approved_at=utc_now())
             self.recorder = self.recorder_factory(self.store, self.session_settings)
@@ -92,17 +108,20 @@ class Controller:
         self.manager.transcribe()
         self.api_approved = False  # A retry must get a new approval.
 
-    def _enqueue(self, store, settings, approved):
+    def _enqueue(self, store, settings, approved, *, transcribe=True):
         if self.processing(store.directory):
             raise RuntimeError("이미 전사 중이거나 대기 중인 회의입니다.")
         options = replace(settings)
-        if options.transcription_backend == "openai" and approved is not True:
+        if transcribe and options.transcription_backend == "openai" and approved is not True:
             raise PermissionError("API upload requires per-session approval")
-        worker = self.transcriber_factory(options)
-        store.update(state="TRANSCRIBING", transcription={"status": "queued", "backend": options.transcription_backend})
-        kwargs = {"api_approved": True} if options.transcription_backend == "openai" and approved else {}
+        worker = self.transcriber_factory(options) if transcribe else self.archive_factory(options)
+        if transcribe:
+            store.update(state="TRANSCRIBING", transcription={"status": "queued", "backend": options.transcription_backend})
+        else:
+            store.update(state="TRANSCRIBING")
+        kwargs = {"api_approved": True} if transcribe and options.transcription_backend == "openai" and approved else {}
         future = self.executor.submit(worker.run, store, **kwargs)
-        self.transcriptions.append(TranscriptionJob(store, future))
+        self.transcriptions.append(TranscriptionJob(store, future, transcribe))
 
     def confirm_save(self, folder_name: str | None = None):
         if not self.save_pending or self.manager.state != State.FINALIZING or self.recorder is not None:
@@ -117,12 +136,8 @@ class Controller:
             if (self.session_settings or self.settings).auto_transcribe:
                 self._transcribe()
             else:
-                self.store.update(state="ERROR" if self.store.metadata["errors"] else "COMPLETE",
-                                  transcription={"status": "disabled"})
-                if self.store.metadata["errors"]:
-                    self.manager.fail()
-                else:
-                    self.manager.complete()
+                self._enqueue(self.store, self.session_settings or self.settings, False, transcribe=False)
+                self.manager.transcribe()
         except Exception:
             self.manager.fail()
             self.notifications.put(("finalization_failed", None))
@@ -147,6 +162,15 @@ class Controller:
         self.manager.recovery()
         self.job = "recovery"
         self.future = self.executor.submit(recover_session, directory)
+
+    def retry_archive(self, store):
+        if self.capture_busy or self.manager.state == State.PROMPTED:
+            raise RuntimeError("녹음 저장을 마친 뒤 재시도하세요.")
+        if store.metadata.get("state") not in {"COMPLETE", "ERROR", "RECOVERY_REQUIRED"}:
+            raise RuntimeError("종료된 녹음만 변환할 수 있습니다.")
+        if not store.metadata.get("storage_policy", {}).get("temporary_wav"):
+            raise ValueError("새 버전에서 녹음한 세션만 MP3 보관 재시도를 지원합니다.")
+        self._enqueue(store, self.settings, False, transcribe=False)
 
     def poll(self):
         if self.recorder:
@@ -193,14 +217,20 @@ class Controller:
                 task.future.result()
                 if selected:
                     self.manager.fail() if task.store.metadata["errors"] else self.manager.complete()
-                self.notifications.put(("transcription_complete", task.store.directory.name))
+                self.notifications.put(("transcription_complete" if task.transcribe else "archive_complete",
+                                        task.store.directory.name))
+                if task.store.metadata.get("archive", {}).get("cleanup") == "retained":
+                    self.notifications.put(("wav_retained", task.store.directory.name))
             except Exception as error:
                 if selected:
                     self.manager.fail()
                 code = ("model_missing" if isinstance(error, FileNotFoundError) else
                         "engine_missing" if isinstance(error, ImportError) else "processing_failed")
                 try:
-                    task.store.update(state="ERROR", transcription={"status": "failed", "code": code})
+                    fields = {"state": "ERROR", "processing_error": code}
+                    if task.transcribe:
+                        fields["transcription"] = {"status": "failed", "code": code}
+                    task.store.update(**fields)
                 except OSError:
                     code = "storage_failed"
                 self.notifications.put((code, task.store.directory.name))

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import io
 from pathlib import Path
 
 from app.audio.validation import inspect_wav
 
 from app.processing.render_markdown import render_markdown
+from app.processing.archive import source_items, reference_file
 from app.processing.model_download import model_installed
 from app.storage.session_store import SessionStore, safe_child, utc_now
 
@@ -34,27 +36,36 @@ class Transcriber:
 
     def _run(self, store: SessionStore, device: str) -> list[dict]:
         inputs = []
-        for item in sorted(store.metadata["segments"], key=lambda s: (s["offset"], s["track"])):
+        for item in source_items(store):
             path = safe_child(store.directory, item["file"])
-            if path.suffix != ".wav":
-                raise ValueError("Only WAV segments can be transcribed")
+            if path.suffix not in {".wav", ".mp3"}:
+                raise ValueError("Only WAV or verified MP3 can be transcribed")
             if item["frames"] == 0:
                 continue
-            inspect_wav(path, item)
+            if path.suffix == ".wav":
+                inspect_wav(path, item)
             inputs.append((item, path))
         model = self._model(device)
         result = []
         for item, path in inputs:
-            segments, _ = model.transcribe(str(path), language=self.settings.language,
-                                          vad_filter=True, beam_size=self.settings.beam_size, condition_on_previous_text=False)
-            # Iteration performs the actual inference; CUDA failures can happen here too.
-            for segment in segments:
-                start, end = max(0.0, segment.start), min(item["duration"], segment.end)
-                if end <= start or not segment.text.strip():
-                    continue
-                result.append({"track": item["track"], "file": item["file"],
-                               "start": item["offset"] + start, "end": item["offset"] + end,
-                               "text": segment.text.strip()})
+            def chunks():
+                if path.suffix == ".wav":
+                    yield str(path), item["offset"], item["duration"]
+                else:
+                    from app.processing.api_transcribe import mp3_chunks
+                    for offset, frames, audio in mp3_chunks(path, seconds=120):
+                        yield io.BytesIO(audio), offset / 16000, frames / 16000
+            for audio, offset, duration in chunks():
+                segments, _ = model.transcribe(audio, language=self.settings.language,
+                                              vad_filter=True, beam_size=self.settings.beam_size, condition_on_previous_text=False)
+                # Iteration performs the actual inference; CUDA failures can happen here too.
+                for segment in segments:
+                    start, end = max(0.0, segment.start), min(duration, segment.end)
+                    if end <= start or not segment.text.strip():
+                        continue
+                    result.append({"track": item["track"], "file": reference_file(store, item),
+                                   "start": offset + start, "end": offset + end,
+                                   "text": segment.text.strip()})
         return result
 
     def run(self, store: SessionStore, *, api_approved=False) -> Path:

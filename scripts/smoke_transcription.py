@@ -55,7 +55,7 @@ def main():
     transcript = Transcriber(Settings(model=str(args.model.resolve()), device=args.device)).run(store)
     content = transcript.read_text(encoding="utf-8")
     checks = {"korean_phrase": "프로젝트" in content, "english_phrase": "project" in content.lower(),
-              "both_tracks": "**시스템 출력**" in content and "**마이크**" in content}
+              "both_tracks": "시스템 출력**" in content and "**마이크**" in content}
     file_report = inspect_session(directory)
     result = {"fixture": str(directory), "recording_performed": False,
               "real_model_inference": True, "requested_device": args.device,
